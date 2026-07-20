@@ -1,0 +1,5 @@
+{
+  "_comment": "Optional. Copy to apps.json (gitignored) and map your own short aliases to Android package names. Full package names always work without this file.",
+  "my-app": "com.example.myapp",
+  "my-app-pro": "com.example.myapp.pro"
+}

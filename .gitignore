@@ -1,0 +1,28 @@
+# Credentials — NEVER commit
+google-play.json
+*-service-account*.json
+service-account*.json
+credentials.json
+*.p8
+*.pem
+
+# Local app-alias config (copy apps.example.json -> apps.json)
+apps.json
+
+# Local report cache
+.cache/
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

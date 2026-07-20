@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "google-play-analytics": {
+      "command": "/absolute/path/to/google-play-analytics-mcp/.venv/bin/python",
+      "args": ["/absolute/path/to/google-play-analytics-mcp/server.py"],
+      "env": {
+        "GOOGLE_PLAY_SA_JSON": "/absolute/path/to/service-account.json",
+        "GOOGLE_PLAY_REPORTS_BUCKET": "pubsite_prod_rev_XXXXXXXXXXXXXXXX"
+      }
+    }
+  }
+}
