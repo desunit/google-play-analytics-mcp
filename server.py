@@ -193,8 +193,10 @@ def get_store_listing_conversion(
         package: str, dimension: str = "channel",
         start_date: str | None = None, end_date: str | None = None,
         top: int = 25) -> dict:
-    """Store-listing **visitors**, **installers** and **visitor→installer
-    conversion rate** (plus retention), from the retained-installers report.
+    """Store-listing visitors, installers, visitor→installer conversion rate +
+    retention, from the retained-installers report. ⚠️ HISTORICAL (≤ 2021-06) —
+    Google retired this export. **For CURRENT conversion rate use
+    `get_store_conversion`.** Kept for historical/retention backfill only.
 
     dimension: 'channel' (acquisition channel), 'country', 'play_country', or
     'utm_tagged'. Visitors and installers are summed across the range and the
@@ -212,6 +214,43 @@ def get_store_listing_conversion(
         for r in data:
             v = r.get(vcol, 0)
             r["conversion_rate"] = round(r.get(icol, 0) / v, 4) if v else None
+    return shaped
+
+
+@mcp.tool()
+def get_store_conversion(
+        package: str, dimension: str = "traffic_source",
+        start_date: str | None = None, end_date: str | None = None,
+        top: int = 25) -> dict:
+    """**Store-listing conversion rate** — store-listing **visitors**,
+    **acquisitions** and the **visitor→install CVR** — the CURRENT Play Console
+    "Conversion analysis" data. This is the live replacement for the retired
+    `get_store_listing_conversion` (retained_installers).
+
+    dimension: 'traffic_source' (Google Play explore / search / Ads and
+    referrals) or 'country'. Visitors and acquisitions are summed across the
+    range and CVR is recomputed as acquisitions/visitors per group (never averaged
+    — averaging the per-row rate is wrong). Returns `overall_conversion_rate` too.
+    """
+    start, end = _default_range(start_date, end_date)
+    res = gp.fetch_family("store_conversion", package, start, end,
+                          dimension=dimension)
+    shaped = _shape(res, group_by=None, how="sum", daily=False, top=top)
+    data = shaped.get("data", [])
+    metrics = shaped.get("metrics", [])
+    vcol = _find(metrics, "visitor")
+    acol = _find(metrics, "acquisition")
+    rate_col = _find(metrics, "conversion rate")  # raw per-row rate — summed = garbage
+    tot_v = tot_a = 0
+    for r in data:
+        if rate_col:
+            r.pop(rate_col, None)  # drop the meaningless summed rate
+        v, a = r.get(vcol, 0), r.get(acol, 0)
+        r["conversion_rate"] = round(a / v, 4) if v else None
+        tot_v += v or 0
+        tot_a += a or 0
+    if tot_v:
+        shaped["overall_conversion_rate"] = round(tot_a / tot_v, 4)
     return shaped
 
 

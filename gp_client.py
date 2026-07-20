@@ -116,7 +116,19 @@ FAMILIES: dict[str, dict] = {
         "dims": ["traffic_source", "country"],
         "default_dim": "traffic_source",
         "desc": "Store acquisitions split by traffic source (Explore / Search / "
-                "Ads and referrals) or by country.",
+                "Ads and referrals) or by country. Acquisitions (installs) only — "
+                "for visitors + conversion rate use 'store_conversion'.",
+    },
+    "store_conversion": {
+        "prefix": "stats/store_performance/",
+        "fileprefix": "store_performance_",  # the non-'total_' sibling
+        "dims": ["traffic_source", "country"],
+        "default_dim": "traffic_source",
+        "desc": "Store-listing VISITORS, acquisitions and visitor->install "
+                "CONVERSION RATE by traffic source (Explore / Search / Ads and "
+                "referrals) or country (also broken down by search term & UTM in "
+                "the raw rows). This is the live replacement for the retired "
+                "retained_installers CVR report.",
     },
     "retained_installers": {
         "prefix": "acquisition/retained_installers/",

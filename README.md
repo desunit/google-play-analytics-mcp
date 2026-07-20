@@ -32,7 +32,8 @@ counterpart to Apple's "App Store Browse vs Search" source-type analytics.
 | `list_report_families` | Every report family, its dimensions and description |
 | `get_acquisitions_by_traffic_source` | **Store acquisitions split by Google Play Explore / Search / Ads & referrals**, with share-of-total % |
 | `get_acquisitions_by_country` | Store acquisitions by country |
-| `get_store_listing_conversion` | Store-listing visitors, installers, visitor→installer conversion rate, retention *(historical: ≤2021-06, see coverage)* |
+| `get_store_conversion` | **Store-listing visitors, acquisitions & visitor→install conversion rate** by traffic source or country (current) |
+| `get_store_listing_conversion` | Legacy visitors/CVR + retention *(historical: ≤2021-06 — use `get_store_conversion` for current data)* |
 | `get_buyers` | Users who purchased within 7 days of install, by channel/country *(historical: ≤2021-06)* |
 | `get_installs` | Installs / uninstalls / active devices, daily or by dimension |
 | `get_ratings` | Average rating over time or by dimension |
@@ -49,7 +50,8 @@ Common parameters: `package` (an alias or a full package name), `start_date` /
 
 | Family | Bucket prefix | Current data? | Dimensions |
 |--------|---------------|---------------|-----------|
-| `store_performance` | `stats/store_performance/` | ✅ live | `traffic_source`, `country` |
+| `store_performance` | `stats/store_performance/` (`total_store_performance_*`) | ✅ live | `traffic_source`, `country` |
+| `store_conversion` | `stats/store_performance/` (`store_performance_*`) | ✅ live | `traffic_source`, `country` — adds **visitors + conversion rate** |
 | `installs` | `stats/installs/` | ✅ live | `overview`, `country`, `device`, `language`, `app_version`, `os_version`, `carrier` |
 | `ratings` | `stats/ratings/` | ✅ live | same as installs |
 | `crashes` | `stats/crashes/` | ✅ live | `overview`, `device`, `os_version`, `app_version` |
@@ -59,9 +61,10 @@ Common parameters: `package` (an alias or a full package name), `start_date` /
 | `buyers_7d` | `acquisition/buyers_7d/` | ⚠️ ≤ 2021-06 | `channel`, `country`, `play_country` |
 
 > Google **discontinued** the `retained_installers` and `buyers_7d` bulk exports
-> after June 2021 (and `ratings_v2` was a short-lived 2022–2023 schema). For
-> current store-listing conversion and acquisition data, use
-> `store_performance`. The historical families remain queryable for backfill.
+> after June 2021 (and `ratings_v2` was a short-lived 2022–2023 schema). Their
+> store-listing **conversion rate** was replaced by the current `store_conversion`
+> family (visitors + CVR); acquisitions live in `store_performance`. The historical
+> families remain queryable for backfill.
 
 ## Prerequisites
 
