@@ -33,6 +33,8 @@ counterpart to Apple's "App Store Browse vs Search" source-type analytics.
 | `get_acquisitions_by_traffic_source` | **Store acquisitions split by Google Play Explore / Search / Ads & referrals**, with share-of-total % |
 | `get_acquisitions_by_country` | Store acquisitions by country |
 | `get_store_conversion` | **Store-listing visitors, acquisitions & visitor→install conversion rate** by traffic source or country (current) |
+| `get_search_terms` | **Google Play search terms** with visitors, acquisitions & CVR *(low-volume terms k-anonymized into 'Other')* |
+| `get_utm_performance` | **UTM source / campaign** performance (Ads & referrals) with visitors, acquisitions & CVR *(low-volume values k-anonymized)* |
 | `get_store_listing_conversion` | Legacy visitors/CVR + retention *(historical: ≤2021-06 — use `get_store_conversion` for current data)* |
 | `get_buyers` | Users who purchased within 7 days of install, by channel/country *(historical: ≤2021-06)* |
 | `get_installs` | Installs / uninstalls / active devices, daily or by dimension |
@@ -157,6 +159,14 @@ A healthy response lists your bucket's top-level prefixes
   → `get_acquisitions_by_traffic_source`
 - *"Which countries drive the most store acquisitions this month?"*
   → `get_acquisitions_by_country`
+- *"Which Google Play search terms bring visitors, and which convert best?"*
+  → `get_search_terms` (branded terms typically convert far higher than generic ones)
+- *"Which UTM campaigns and sources drive store installs?"*
+  → `get_utm_performance` (e.g. `<source> / <campaign>`)
+- *"What's my visitor→install conversion rate by country?"*
+  → `get_store_conversion(dimension="country")`
+- *"How do installs break down by language?"*
+  → `get_installs(dimension="language")`
 - *"What's my daily install and uninstall trend?"* → `get_installs(daily=True)`
 - *"How is my rating trending?"* → `get_ratings`
 - *"Which app versions crash most?"* → `get_crashes(dimension="app_version")`
@@ -185,6 +195,10 @@ don't re-fetch. Object listings are cached per process.
 - Downloaded reports (which contain your business data) are cached **outside** the
   repo tree by default (`~/.cache/...`).
 
+## Author
+
+Built by **[Songtive](https://songtive.com)** — [@desunit](https://x.com/desunit) on X.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE) © Songtive

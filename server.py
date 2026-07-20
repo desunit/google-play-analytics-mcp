@@ -255,6 +255,59 @@ def get_store_conversion(
 
 
 @mcp.tool()
+def get_search_terms(
+        package: str, start_date: str | None = None, end_date: str | None = None,
+        top: int = 25, include_masked: bool = False) -> dict:
+    """**Google Play search terms** that drove store-listing visits — each term
+    with its **visitors, acquisitions and visitor→install CVR** over the range
+    (default last 30 days). Sourced from the store-conversion report's
+    traffic-source breakdown.
+
+    Caveats: search terms only populate for the *Google Play search* traffic
+    source, and Google **k-anonymizes** low-volume terms into an 'Other' bucket
+    (what survives is mostly brand/competitor terms). Masked buckets are excluded
+    by default — the `masked_note` reports how much volume was hidden; pass
+    include_masked=True to include them.
+    """
+    start, end = _default_range(start_date, end_date)
+    res = gp.fetch_family("store_conversion", package, start, end,
+                          dimension="traffic_source")
+    col = _find(res["columns"], "search term")
+    if not col:
+        return {**_meta(res), "note": "no search-term column in this report",
+                "data": []}
+    return _grouped_cvr(res, col, top, include_masked)
+
+
+@mcp.tool()
+def get_utm_performance(
+        package: str, start_date: str | None = None, end_date: str | None = None,
+        top: int = 25, include_masked: bool = False) -> dict:
+    """**UTM source / campaign** performance for store-listing acquisition —
+    each `source / campaign` pair with its **visitors, acquisitions and
+    visitor→install CVR** over the range (default last 30 days). Sourced from the
+    store-conversion report's traffic-source breakdown.
+
+    Caveats: UTM values only populate for the *Ads and referrals* traffic source
+    (tagged deep links / referrers), and Google **k-anonymizes** low-volume
+    values into 'Other'/'No … specified' buckets. Masked buckets are excluded by
+    default (see `masked_note`); pass include_masked=True to include them.
+    """
+    start, end = _default_range(start_date, end_date)
+    res = gp.fetch_family("store_conversion", package, start, end,
+                          dimension="traffic_source")
+    scol = _find(res["columns"], "utm source")
+    ccol = _find(res["columns"], "utm campaign")
+    if not scol and not ccol:
+        return {**_meta(res), "note": "no UTM columns in this report", "data": []}
+    key = "UTM (source / campaign)"
+    for r in res["rows"]:
+        r[key] = f"{r.get(scol, '')} / {r.get(ccol, '')}"
+    res["columns"] = [*res["columns"], key]
+    return _grouped_cvr(res, key, top, include_masked)
+
+
+@mcp.tool()
 def get_buyers(package: str, dimension: str = "channel",
                start_date: str | None = None, end_date: str | None = None,
                top: int = 25) -> dict:
@@ -355,6 +408,59 @@ def _find(cols: list[str], needle: str) -> str | None:
         if needle.lower() in c.lower():
             return c
     return None
+
+
+# Google k-anonymizes low-volume search terms / UTM values into these buckets.
+_MASK_TOKENS = {
+    "", "other",
+    "no search terms specified", "no search term specified",
+    "no utm source specified", "no utm campaign specified",
+}
+
+
+def _is_masked(label: str) -> bool:
+    """True when every part of a (possibly `a / b`) label is a masked bucket."""
+    parts = [p.strip().lower() for p in str(label).split(" / ")]
+    return all(p in _MASK_TOKENS for p in parts)
+
+
+def _grouped_cvr(res: dict, group_col: str, top: int,
+                 include_masked: bool) -> dict:
+    """Group store_conversion rows by `group_col`, summing visitors and
+    acquisitions and recomputing a TRUE conversion rate (acquisitions/visitors)
+    per group. Drops k-anonymized buckets unless `include_masked`."""
+    cols = res["columns"]
+    vcol = _find(cols, "visitor")
+    acol = _find(cols, "acquisition")
+    metrics = [c for c in (acol, vcol) if c]
+    agg = gp.aggregate(res["rows"], group_col, metrics, how="sum")
+
+    data, tot_v, tot_a, masked_v, masked_a = [], 0, 0, 0, 0
+    for r in agg:
+        v, a = r.get(vcol, 0) or 0, r.get(acol, 0) or 0
+        if _is_masked(r.get(group_col, "")):
+            masked_v += v
+            masked_a += a
+            if not include_masked:
+                continue
+        r["conversion_rate"] = round(a / v, 4) if v else None
+        data.append(r)
+        tot_v += v
+        tot_a += a
+    data.sort(key=lambda r: r.get(acol, 0) or 0, reverse=True)
+
+    out = {**_meta(res), "grouped_by": group_col, "metrics": metrics,
+           "aggregation": "sum",
+           "truncated": len(data) > top, "data": data[:top]}
+    if tot_v:
+        out["overall_conversion_rate"] = round(tot_a / tot_v, 4)
+    if not include_masked and masked_v:
+        # Be honest about how much volume Google hid in the "Other" buckets.
+        out["masked_note"] = (
+            "Excludes k-anonymized 'Other'/'No … specified' buckets: "
+            f"{masked_a} acquisitions / {masked_v} visitors hidden. "
+            "Pass include_masked=True to see them.")
+    return out
 
 
 if __name__ == "__main__":
