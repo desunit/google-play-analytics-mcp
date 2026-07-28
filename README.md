@@ -184,6 +184,36 @@ service account key ──► google-auth ──► short-lived Storage token
 Downloaded report files are cached under `GOOGLE_PLAY_CACHE_DIR` so repeat queries
 don't re-fetch. Object listings are cached per process.
 
+### Cache validation (important)
+
+Play **rewrites the current month's report file every day** as new days land. A
+cache that is never revalidated therefore serves a *truncated month* — the data
+looks complete, it just silently stops days or weeks early.
+
+Every cached file is validated on read against the object's bucket-side
+`updated` + `size`, plus the on-disk byte length recorded when it was written.
+Any mismatch re-downloads. Use `clear_report_cache(pattern=...)` only to drop a
+suspected-corrupt entry; routine use is unnecessary.
+
+### Coverage (important)
+
+Every response carries a `coverage` block:
+
+```json
+"coverage": {
+  "data_through": "2026-07-21", "requested_through": "2026-07-23",
+  "days_expected": 7, "days_present": 4,
+  "missing_dates": ["2026-07-20", "2026-07-22", "2026-07-23"],
+  "lag_days": 2,
+  "warning": "1 day(s) missing INSIDE the range (2026-07-20) — per-day averages, not sums, are needed to compare this window with another."
+}
+```
+
+Play publishes with a lag and occasionally drops a day mid-range. **Read
+`coverage` before comparing two windows** — otherwise a "7-day vs 7-day"
+comparison can silently be 7 days against 4, which reads as a ~40% decline that
+is not real. When `days_present` differs between windows, compare per-day means.
+
 ## Security
 
 - **No credentials are stored in this repository.** The service-account key, the

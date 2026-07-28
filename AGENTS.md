@@ -33,6 +33,16 @@ exposes them as analytics tools. Python 3.11+, stdlib + `mcp`, `google-auth`,
    (`retained_installers`, `buyers_7d` after 2021-06; `ratings_v2` was
    2022–2023 only). Keep the `desc` fields and README coverage table accurate;
    flag historical-only families rather than implying live data.
+5. **Never serve an unvalidated cache.** Play rewrites the *current month's*
+   file daily, so a cache keyed on filename alone silently returns a truncated
+   month. `download_object()` revalidates against the object's bucket-side
+   `updated`/`size` plus the on-disk byte length on every read; keep it that
+   way. Any new fetch path must go through it, not a bare `_request()`.
+6. **Every response must carry `coverage`.** `fetch_family()` computes
+   `data_through` / `days_present` / `missing_dates` and warns on days missing
+   *inside* the range; `_meta()` in `server.py` passes it through. Without it a
+   caller comparing two windows can unknowingly compare 7 days against 4 and
+   read a reporting hole as a real decline. Don't drop it to save tokens.
 
 ## Adding a report family
 

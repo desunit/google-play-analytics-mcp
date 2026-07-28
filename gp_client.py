@@ -292,19 +292,101 @@ def list_prefixes(prefix: str = "") -> list[str]:
     return json.loads(_request(url)).get("prefixes", [])
 
 
+def object_meta(name: str) -> dict | None:
+    """Bucket-side {size, updated} for one object, read from the (per-process
+    cached) listing of its parent prefix. None if the object isn't listed."""
+    prefix = name.rsplit("/", 1)[0] + "/"
+    try:
+        for it in list_objects(prefix):
+            if it.get("name") == name:
+                return {"size": it.get("size"), "updated": it.get("updated")}
+    except Exception:  # noqa: BLE001 — listing failure => unverifiable
+        return None
+    return None
+
+
+def _meta_path(cached: Path) -> Path:
+    return cached.with_name(cached.name + ".meta.json")
+
+
 def download_object(name: str, use_cache: bool = True) -> bytes:
-    """Download one object's bytes, caching to the local cache dir."""
+    """Download one object's bytes, caching to the local cache dir.
+
+    The cache is validated against the object's bucket-side `updated`/`size`
+    metadata on every read. Play REWRITES the current month's report file each
+    day, so an unvalidated cache silently serves a truncated month — the reason
+    this check exists. If the metadata can't be fetched the object is
+    re-downloaded, falling back to the cached copy only if that fails.
+    """
     safe = name.replace("/", "__")
     cached = cache_dir() / safe
-    if use_cache and cached.is_file() and cached.stat().st_size > 0:
-        return cached.read_bytes()
+    stamp = _meta_path(cached)
+    have_cache = cached.is_file() and cached.stat().st_size > 0
+    meta = object_meta(name) if use_cache else None
+
+    if use_cache and have_cache and meta is not None:
+        try:
+            saved = json.loads(stamp.read_text())
+            # Bucket metadata must match AND the file must still be the size we
+            # wrote. The bucket reports the *compressed* size while `alt=media`
+            # returns it decompressed, so the on-disk length is stamped
+            # separately — this is what catches a truncated/corrupt cache file.
+            if (saved.get("size") == meta["size"]
+                    and saved.get("updated") == meta["updated"]
+                    and saved.get("local_size") == cached.stat().st_size):
+                return cached.read_bytes()
+        except (OSError, ValueError):
+            pass  # missing/corrupt stamp => treat as stale
+
     enc = urllib.parse.quote(name, safe="")
     url = (f"https://storage.googleapis.com/storage/v1/b/{bucket()}/o/{enc}"
            "?alt=media")
-    raw = _request(url)
+    try:
+        raw = _request(url)
+    except Exception:  # noqa: BLE001
+        if have_cache:
+            return cached.read_bytes()
+        raise
     if use_cache:
         cached.write_bytes(raw)
+        if meta is not None:
+            stamp.write_text(json.dumps({**meta, "local_size": len(raw)}))
+        else:
+            stamp.unlink(missing_ok=True)
     return raw
+
+
+def cache_stats() -> dict:
+    """Entry count and size of the local report cache."""
+    d = cache_dir()
+    files = [p for p in d.glob("*") if p.is_file()
+             and not p.name.endswith(".meta.json")]
+    unverified = [p.name for p in files if not _meta_path(p).is_file()]
+    return {
+        "dir": str(d),
+        "entries": len(files),
+        "bytes": sum(p.stat().st_size for p in files),
+        "unverified_entries": len(unverified),
+    }
+
+
+def purge_cache(pattern: str | None = None) -> dict:
+    """Delete cached report files (and their validation stamps).
+
+    `pattern` is a substring match on the cache filename, e.g. '202607' for one
+    month or a package name. None purges everything.
+    """
+    removed = []
+    for p in cache_dir().glob("*"):
+        if not p.is_file():
+            continue
+        if pattern and pattern not in p.name:
+            continue
+        p.unlink(missing_ok=True)
+        if not p.name.endswith(".meta.json"):
+            removed.append(p.name)
+    _LIST_CACHE.clear()
+    return {"removed": len(removed), "pattern": pattern, "files": removed[:50]}
 
 
 # --------------------------------------------------------------------------- #
@@ -402,6 +484,7 @@ def fetch_family(family: str, package: str, start_date: str, end_date: str,
     files = _matching_files(spec, pkg, months, dimension)
     rows: list[dict] = []
     columns: list[str] = []
+    seen_dates: set[date] = set()
     for name in files:
         text = decode_report(download_object(name))
         parsed = parse_csv(text)
@@ -411,6 +494,8 @@ def fetch_family(family: str, package: str, start_date: str, end_date: str,
             d = _row_date(row)
             if d is None or start <= d <= end:
                 rows.append(row)
+                if d is not None:
+                    seen_dates.add(d)
     return {
         "package": pkg,
         "family": family,
@@ -419,7 +504,37 @@ def fetch_family(family: str, package: str, start_date: str, end_date: str,
         "files": [f.rsplit("/", 1)[-1] for f in files],
         "columns": columns,
         "rows": rows,
+        "coverage": _coverage(seen_dates, start, end),
     }
+
+
+def _coverage(seen: set[date], start: date, end: date) -> dict:
+    """Which requested days actually have rows.
+
+    Play publishes with a lag and occasionally drops a day. Comparing two
+    windows without checking this silently compares e.g. 7 days against 4.
+    """
+    from datetime import timedelta
+    expected = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    missing = [d.isoformat() for d in expected if d not in seen]
+    latest = max(seen).isoformat() if seen else None
+    cov = {
+        "data_through": latest,
+        "requested_through": end.isoformat(),
+        "days_expected": len(expected),
+        "days_present": len(expected) - len(missing),
+        "missing_dates": missing[:40],
+    }
+    if latest and latest < end.isoformat():
+        cov["lag_days"] = (end - max(seen)).days
+    if missing:
+        interior = [d for d in missing if latest and d < latest]
+        if interior:
+            cov["warning"] = (
+                f"{len(interior)} day(s) missing INSIDE the range "
+                f"({', '.join(interior[:5])}) — per-day averages, not sums, "
+                "are needed to compare this window with another.")
+    return cov
 
 
 def _row_date(row: dict) -> date | None:

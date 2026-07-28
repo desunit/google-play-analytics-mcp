@@ -101,7 +101,9 @@ def _shape(result: dict, group_by: str | None, how: str,
 def _meta(result: dict) -> dict:
     return {"package": result["package"], "family": result["family"],
             "dimension": result["dimension"],
-            "date_range": result["date_range"], "files": result["files"]}
+            "date_range": result["date_range"],
+            "coverage": result.get("coverage", {}),
+            "files": result["files"]}
 
 
 # --------------------------------------------------------------------------- #
@@ -116,12 +118,25 @@ def health_check() -> dict:
         email = gp.service_account_email()
         prefixes = gp.list_prefixes()
         return {"ok": True, "service_account": email, "bucket": gp.bucket(),
-                "top_level_prefixes": prefixes}
+                "top_level_prefixes": prefixes,
+                "cache": gp.cache_stats()}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e),
                 "hint": "Set GOOGLE_PLAY_SA_JSON to a service-account key with "
                         "read access to the Play reports bucket, and ensure the "
                         "SA is linked in Play Console (or granted bucket IAM)."}
+
+
+@mcp.tool()
+def clear_report_cache(pattern: str | None = None) -> dict:
+    """Force-drop locally cached report CSVs so the next query re-downloads them.
+
+    Cached files are normally validated against the bucket's `updated`/`size`
+    metadata on every read, so this is rarely needed — use it if you suspect a
+    corrupt cache entry. `pattern` is a substring match on the cache filename
+    (e.g. '202607' for one month, or a package name); omit it to purge all.
+    """
+    return gp.purge_cache(pattern)
 
 
 @mcp.tool()
