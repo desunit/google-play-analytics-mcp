@@ -41,6 +41,7 @@ counterpart to Apple's "App Store Browse vs Search" source-type analytics.
 | `get_ratings` | Average rating over time or by dimension |
 | `get_crashes` | Crashes & ANRs, daily or by dimension |
 | `get_subscriptions` | New / cancelled / active subscriptions by country |
+| `get_cancellation_reasons` | **Subscription cancel-survey free-text answers** (date, SKU, country, response), deduped, with totals by SKU / month and the most repeated answers *(default last 90 days)* |
 | `get_reviews` | Individual user reviews (rating + text) |
 | `fetch_raw_report` | Escape hatch — raw parsed rows for any family/dimension |
 
@@ -58,9 +59,18 @@ Common parameters: `package` (an alias or a full package name), `start_date` /
 | `ratings` | `stats/ratings/` | ✅ live | same as installs |
 | `crashes` | `stats/crashes/` | ✅ live | `overview`, `device`, `os_version`, `app_version` |
 | `subscriptions` | `financial-stats/subscriptions/` | ✅ live | `country` |
+| `cancellations` | `subscriptions/cancellations/` (`freeform_<package>.csv`) | ✅ live, full history in one file | — |
 | `reviews` | `reviews/` | ✅ live | — |
 | `retained_installers` | `acquisition/retained_installers/` | ⚠️ ≤ 2021-06 | `channel`, `country`, `play_country`, `utm_tagged` |
 | `buyers_7d` | `acquisition/buyers_7d/` | ⚠️ ≤ 2021-06 | `channel`, `country`, `play_country` |
+
+> **`cancellations` quirks:** the file is a **ZIP archive under a `.csv` name** (unpacked
+> automatically), holds the package's **entire history** and is rewritten daily. It carries
+> only the **free-text** answers from Play's cancel survey — the multiple-choice reason counts
+> are not in the bulk export. Google writes nearly every answer **3 times** (sometimes with
+> `Country` on one copy only); `get_cancellation_reasons` collapses them on date + SKU + answer.
+> The same answer can reappear ~3 days later (likely one user at trial cancel and at expiry) —
+> that is not merged. `Country` is blank on most rows.
 
 > Google **discontinued** the `retained_installers` and `buyers_7d` bulk exports
 > after June 2021 (and `ratings_v2` was a short-lived 2022–2023 schema). Their

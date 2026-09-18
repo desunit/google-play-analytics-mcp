@@ -34,6 +34,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
@@ -187,6 +188,19 @@ FAMILIES: dict[str, dict] = {
         "default_dim": "country",
         "desc": "Subscription activity (new / cancelled / active) by country. "
                 "One file per product.",
+    },
+    "cancellations": {
+        "prefix": "subscriptions/cancellations/",
+        "fileprefix": "freeform_",
+        "dims": [None],
+        "default_dim": None,
+        "single_file": True,
+        "desc": "Subscription CANCELLATION-SURVEY free-text answers (the 'Other' "
+                "box of Play's cancel survey): cancellation date, SKU, country, "
+                "response. One ZIP-in-.csv file per package holding the full "
+                "history, rewritten daily. Google writes most rows 3x — read it "
+                "through get_cancellation_reasons (dedupes). The multiple-choice "
+                "reason counts are NOT in the bulk export.",
     },
     "reviews": {
         "prefix": "reviews/",
@@ -393,9 +407,20 @@ def purge_cache(pattern: str | None = None) -> dict:
 # Decoding & parsing
 # --------------------------------------------------------------------------- #
 
+def unzip_if_needed(raw: bytes) -> bytes:
+    """Some Play exports are a ZIP archive under a `.csv` name (the
+    subscription-cancellation file is). Return the first member's bytes."""
+    if raw[:4] == b"PK\x03\x04":
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            members = [n for n in z.namelist() if not n.endswith("/")]
+            return z.read(members[0]) if members else b""
+    return raw
+
+
 def decode_report(raw: bytes) -> str:
     """Play reports are UTF-16 (installs/ratings/crashes) or UTF-8 (acquisition).
-    Detect via BOM, then fall back."""
+    Detect via BOM, then fall back. ZIP-wrapped files are unpacked first."""
+    raw = unzip_if_needed(raw)
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
         return raw.decode("utf-16")
     if raw[:3] == b"\xef\xbb\xbf":
@@ -409,7 +434,8 @@ def decode_report(raw: bytes) -> str:
 
 
 def parse_csv(text: str) -> list[dict]:
-    reader = csv.DictReader(io.StringIO(text))
+    # newline="" keeps line breaks INSIDE quoted fields (free-text answers).
+    reader = csv.DictReader(io.StringIO(text, newline=""))
     return [dict(row) for row in reader]
 
 
@@ -481,7 +507,11 @@ def fetch_family(family: str, package: str, start_date: str, end_date: str,
     end = _parse_date(end_date)
     months = set(months_in_range(start, end))
 
-    files = _matching_files(spec, pkg, months, dimension)
+    if spec.get("single_file"):
+        files = [it["name"] for it in list_objects(spec["prefix"])
+                 if it["name"].rsplit("/", 1)[-1].startswith(spec["fileprefix"] + pkg + ".")]
+    else:
+        files = _matching_files(spec, pkg, months, dimension)
     rows: list[dict] = []
     columns: list[str] = []
     seen_dates: set[date] = set()
@@ -538,7 +568,7 @@ def _coverage(seen: set[date], start: date, end: date) -> dict:
 
 
 def _row_date(row: dict) -> date | None:
-    for key in ("Date", "date"):
+    for key in ("Date", "date", "Cancellation Date"):
         if key in row and row[key]:
             try:
                 return _parse_date(row[key][:10])

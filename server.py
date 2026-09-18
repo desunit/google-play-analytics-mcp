@@ -3,7 +3,8 @@
 
 An MCP server exposing Google Play Console analytics — store-listing views,
 conversion rates, acquisitions by traffic source (Explore / Search / Ads &
-referrals), installs, ratings, crashes, subscriptions and reviews — read from
+referrals), installs, ratings, crashes, subscriptions, cancellation-survey answers and
+reviews — read from
 the developer's Play Console bulk-reports Cloud Storage bucket.
 
 Data granularity: reports are monthly files of daily rows. The most recent
@@ -397,6 +398,63 @@ def get_reviews(package: str, start_date: str | None = None,
     return {**_meta(res), "columns": res["columns"],
             "row_count": len(res["rows"]),
             "truncated": len(res["rows"]) > limit, "data": rows}
+
+
+@mcp.tool()
+def get_cancellation_reasons(package: str, start_date: str | None = None,
+                             end_date: str | None = None,
+                             sku: str | None = None, dedupe: bool = True,
+                             limit: int = 100) -> dict:
+    """Subscription CANCELLATION REASONS — the free-text answers users type in
+    Play's cancel survey ('Other'), with cancellation date, SKU and country.
+
+    Default range = last 90 days (answers are sparse: a few to ~10 a month).
+    `sku` = substring filter on the product id (e.g. '1y', 'sub.1m').
+    `dedupe=True` (default) collapses repeats of the same date + SKU + answer —
+    Google writes nearly every answer 3 times, sometimes with Country on one copy. Returns totals by SKU and month, the most repeated
+    answers, and the rows newest first (capped at `limit`).
+    Limits: only the free-text answers are exported, NOT the multiple-choice
+    reason counts; Country is blank on most rows."""
+    if start_date is None and end_date is None:
+        end_d = _dt.date.today()
+        start, end = (end_d - _dt.timedelta(days=90)).isoformat(), end_d.isoformat()
+    else:
+        start, end = _default_range(start_date, end_date)
+    res = gp.fetch_family("cancellations", package, start, end, dimension=None)
+    rows = res["rows"]
+    if sku:
+        rows = [r for r in rows if sku in (r.get("Sku Id") or "")]
+    raw_count = len(rows)
+    if dedupe:
+        # Key on date + SKU + answer, NOT country: Google repeats each answer
+        # and sometimes fills Country on only one copy. Keep a filled country.
+        best: dict[tuple, dict] = {}
+        for r in rows:
+            k = (r.get("Cancellation Date"), r.get("Sku Id"),
+                 " ".join((r.get("Response") or "").split()))
+            if k not in best or (not best[k].get("Country") and r.get("Country")):
+                best[k] = r
+        rows = list(best.values())
+    rows = sorted(rows, key=lambda r: r.get("Cancellation Date") or "", reverse=True)
+
+    def _count(key_fn) -> dict:
+        out: dict[str, int] = {}
+        for r in rows:
+            k = key_fn(r)
+            out[k] = out.get(k, 0) + 1
+        return dict(sorted(out.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    top = _count(lambda r: " ".join((r.get("Response") or "").lower().split()))
+    meta = _meta(res)
+    meta.pop("coverage", None)  # answers are event-driven; empty days are normal
+    return {**meta, "columns": res["columns"],
+            "rows_in_range_raw": raw_count, "row_count": len(rows),
+            "deduped": dedupe,
+            "by_sku": _count(lambda r: r.get("Sku Id") or ""),
+            "by_month": dict(sorted(_count(
+                lambda r: (r.get("Cancellation Date") or "")[:7]).items())),
+            "top_responses": dict(list(top.items())[:15]),
+            "truncated": len(rows) > limit, "data": rows[:limit]}
 
 
 # --------------------------------------------------------------------------- #
